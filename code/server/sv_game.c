@@ -1594,8 +1594,15 @@ void SV_ShutdownGameProgs( void ) {
 	ge->Shutdown();
 	Sys_UnloadGame();
 
+#ifndef __SWITCH__
 	// Free all memory allocated by the game module
 	Z_FreeTags(TAG_GAME);
+#else
+	// Switch: the game module is statically linked (never reloaded), so its C++
+	// statics persist across maps and point into TAG_GAME. Wiping it here would
+	// dangle them and crash on the next map's re-init. The per-map blocks instead
+	// leak into the large libnx heap and are reclaimed when the app closes.
+#endif
 
 	ge = NULL;
 }

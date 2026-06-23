@@ -74,6 +74,7 @@ UIPulldownMenu::UIPulldownMenu()
 {
     m_listener           = NULL;
     m_submenu            = -1;
+    m_bTouchJustOpened   = false;
     m_highlightBGColor.r = 0.02f;
     m_highlightBGColor.g = 0.07f;
     m_highlightBGColor.b = 0.005f;
@@ -226,12 +227,14 @@ void UIPulldownMenu::MouseDragged(Event *ev)
 
         UIPopupMenu *menu = MenuFromPoint(cursorLocation);
         if (!menu) {
-            UIPopupMenu *submenu = m_submenuptr;
-            while (submenu->m_submenu != -1) {
-                submenu = submenu->m_submenuptr;
-            }
+            if (m_submenuptr) {
+                UIPopupMenu *submenu = m_submenuptr;
+                while (submenu->m_submenu != -1) {
+                    submenu = submenu->m_submenuptr;
+                }
 
-            submenu->MouseMoved(ev);
+                submenu->MouseMoved(ev);
+            }
         } else {
             while (menu->m_parentMenu) {
                 menu = menu->m_parentMenu;
@@ -244,23 +247,43 @@ void UIPulldownMenu::MouseDragged(Event *ev)
         return;
     }
 
-    if (m_submenu != -1) {
+    if (m_submenu != -1 && m_submenuptr) {
         m_submenuptr->Disconnect(this, W_Destroyed);
-        if (m_submenuptr) {
-            delete m_submenuptr;
-        }
+        delete m_submenuptr;
     }
 
     m_submenu    = newSubMenu;
+#ifdef __SWITCH__
+    m_bTouchJustOpened = true;
+#endif
     m_submenuptr = new UIPopupMenu();
     subRect.pos.x += m_screenframe.pos.x;
     subRect.pos.y += m_screenframe.pos.y;
     m_submenuptr->Create(&subdesc->desc, m_listener, subRect, UIP_WHERE_DOWN, m_bVirtual, -1.0f);
+#ifndef __SWITCH__
+    // Switch: skip this connection. On a menu rebuild (e.g. applying a video
+    // setting) the widgets are torn down without destructors, so it references
+    // recycled memory and crashes (PC=0). The submenu is already driven
+    // explicitly via m_submenu and the self-nulling SafePtr m_submenuptr.
     m_submenuptr->Connect(this, W_Destroyed, EV_Pulldown_ChildKilled);
+#endif
 }
 
 void UIPulldownMenu::MouseReleased(Event *ev)
 {
+#ifdef __SWITCH__
+    // Touch: this release ends the tap that just opened the submenu. On a plain
+    // tap on the title, keep it open and stay first responder so the next tap
+    // can land on an item; on a press-drag-release onto an item, fall through.
+    if (m_bTouchJustOpened) {
+        m_bTouchJustOpened = false;
+        UIPoint2D relpoint(ev->GetFloat(1), ev->GetFloat(2));
+        if (!MenuFromPoint(relpoint)) {
+            return;
+        }
+    }
+#endif
+
     if (uWinMan.getFirstResponder() == this) {
         uWinMan.setFirstResponder(NULL);
         UIPoint2D    point(ev->GetFloat(1), ev->GetFloat(2));
@@ -271,8 +294,10 @@ void UIPulldownMenu::MouseReleased(Event *ev)
     }
 
     if (m_submenu != -1) {
-        m_submenuptr->Disconnect(this, W_Destroyed);
-        delete m_submenuptr;
+        if (m_submenuptr) {
+            m_submenuptr->Disconnect(this, W_Destroyed);
+            delete m_submenuptr;
+        }
         m_submenu = -1;
     }
 }

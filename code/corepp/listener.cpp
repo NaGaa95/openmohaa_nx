@@ -564,8 +564,17 @@ void L_InitEvents(void)
     g_watch      = LISTENER_Cvar_Get("g_watch", "0", 0);
     g_eventstats = LISTENER_Cvar_Get("g_eventstats", "0", 0);
 
-    Event::LoadEvents();
-    ClassDef::BuildEventResponses();
+#ifdef __SWITCH__
+    // Switch: modules aren't reloaded between maps, so these static event tables
+    // persist. Rebuilding them re-assigns eventnums and overflows
+    // ClassDef::responseLookup (sized by NumEventCommands()), corrupting the heap
+    // on the 2nd map. Build once; the per-map event queue is still reset below.
+    if (!Listener::EventSystemStarted)
+#endif
+    {
+        Event::LoadEvents();
+        ClassDef::BuildEventResponses();
+    }
 
     LL_Reset(&Event::EventQueue, next, prev);
 
@@ -616,6 +625,9 @@ void L_ShutdownEvents(void)
 
     L_ClearEventList();
 
+#ifndef __SWITCH__
+    // Switch: keep the static event tables across maps (see L_InitEvents); only
+    // the per-map event queue (cleared above) is reset.
     Event::commandList.clear();
     Event::eventDefList.clear();
 #ifdef WITH_SCRIPT_ENGINE
@@ -626,6 +638,7 @@ void L_ShutdownEvents(void)
 #endif
 
     Listener::EventSystemStarted = false;
+#endif
 }
 
 //===========================================================================
@@ -1607,7 +1620,8 @@ CLASS_DECLARATION(Class, Event, NULL) {
     {NULL, NULL}
 };
 
-#ifndef _DEBUG_MEM
+// __SWITCH__: use the global guarded/quarantining allocator (see listener.h).
+#if !defined(_DEBUG_MEM) && !defined(__SWITCH__)
 
 /*
 =======================

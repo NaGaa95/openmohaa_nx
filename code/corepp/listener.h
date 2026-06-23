@@ -363,7 +363,11 @@ public:
 
     bool operator!=(Event ev) { return eventnum != ev.eventnum; }
 
-#ifndef _DEBUG_MEM
+// On the Switch port, route Event through the global (canary-guarded,
+// quarantining) allocator instead of the Event block pool, so a double-delete
+// keeps a valid vtable and is absorbed rather than crashing in the virtual
+// destructor dispatch. See openmohaa_nx/source/nx_heapguard.cpp.
+#if !defined(_DEBUG_MEM) && !defined(__SWITCH__)
     void *operator new(size_t size);
     void  operator delete(void *ptr);
 #endif

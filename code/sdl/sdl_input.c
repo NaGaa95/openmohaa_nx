@@ -53,6 +53,17 @@ static cvar_t *in_joystickThreshold = NULL;
 static cvar_t *in_joystickNo        = NULL;
 static cvar_t *in_joystickUseAnalog = NULL;
 
+#ifdef __SWITCH__
+// Virtual mouse cursor for the Switch. There is no physical mouse, so the
+// mouse-driven UI (main menu, etc.) is fed from the touchscreen (absolute
+// tap-to-position) and the right analog stick (relative). IN_GetMousePosition()
+// in sdl_mouse.c returns this, which the OPM absolute-cursor path
+// (CL_UpdateMouse) copies into cl.mousex/cl.mousey each frame. Requires the
+// mouse to be ungrabbed (in_mouse 0), which is the Switch default.
+int nx_cursorX = 640;
+int nx_cursorY = 360;
+#endif
+
 static int vidRestartTime = 0;
 
 static int in_eventTime = 0;
@@ -525,6 +536,11 @@ static void IN_InitJoystick( void )
 		Cvar_Set( "in_joystickNo", "0" );
 
 	in_joystickUseAnalog = Cvar_Get( "in_joystickUseAnalog", "0", CVAR_ARCHIVE );
+#ifdef __SWITCH__
+	// Analog sticks are the only way to move/look on the console, so force the
+	// analog path on regardless of any saved config.
+	Cvar_Set( "in_joystickUseAnalog", "1" );
+#endif
 
 	stick = SDL_JoystickOpen( in_joystickNo->integer );
 
@@ -713,6 +729,33 @@ static void IN_GamepadMove( void )
 		}
 	}
 
+#ifdef __SWITCH__
+	// In menus/console, drive the virtual mouse cursor with the right stick and
+	// use A as left-click / B as escape, so the mouse-driven UI is fully usable
+	// from the controller (in addition to the touchscreen).
+	if (Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CONSOLE))
+	{
+		int        rx = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_RIGHTX);
+		int        ry = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_RIGHTY);
+		int        w  = cls.glconfig.vidWidth  ? cls.glconfig.vidWidth  : 1280;
+		int        h  = cls.glconfig.vidHeight ? cls.glconfig.vidHeight : 720;
+		const int  dz = 7000;
+		static qboolean aPrev = qfalse, bPrev = qfalse;
+		qboolean   aNow, bNow;
+
+		if (abs(rx) > dz) { nx_cursorX += (int)(((float)rx / 32767.0f) * 18.0f); }
+		if (abs(ry) > dz) { nx_cursorY += (int)(((float)ry / 32767.0f) * 18.0f); }
+		if (nx_cursorX < 0) nx_cursorX = 0; else if (nx_cursorX > w) nx_cursorX = w;
+		if (nx_cursorY < 0) nx_cursorY = 0; else if (nx_cursorY > h) nx_cursorY = h;
+
+		aNow = SDL_GameControllerGetButton(gamepad, SDL_CONTROLLER_BUTTON_A);
+		if (aNow != aPrev) { Com_QueueEvent(in_eventTime, SE_KEY, K_MOUSE1, aNow, 0, NULL); aPrev = aNow; }
+
+		bNow = SDL_GameControllerGetButton(gamepad, SDL_CONTROLLER_BUTTON_B);
+		if (bNow != bPrev) { Com_QueueEvent(in_eventTime, SE_KEY, K_ESCAPE, bNow, 0, NULL); bPrev = bNow; }
+	}
+#endif
+
 	// must defer translated axes until all real axes are processed
 	// must be done this way to prevent a later mapped axis from zeroing out a previous one
 	if (in_joystickUseAnalog->integer)
@@ -729,6 +772,17 @@ static void IN_GamepadMove( void )
 	{
 		int axis = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_LEFTX + i);
 		int oldAxis = stick_state.oldaaxes[i];
+
+#ifdef __SWITCH__
+		// The four stick axes (0..3) are fed directly to the engine below
+		// (see the direct CL_JoystickEvent feed), so skip the key-translation
+		// path for them here - it was emitting unbound PAD0_*STICK_* key events
+		// and never producing analog motion. Triggers (4,5) still map to keys.
+		if (i < 4) {
+			stick_state.oldaaxes[i] = axis;
+			continue;
+		}
+#endif
 
 		// Smoothly ramp from dead zone to maximum value
 		float f = ((float)abs(axis) / 32767.0f - in_joystickThreshold->value) / (1.0f - in_joystickThreshold->value);
@@ -815,6 +869,37 @@ static void IN_GamepadMove( void )
 				Com_QueueEvent(in_eventTime, SE_JOYSTICK_AXIS, i, translatedAxes[i], 0, NULL);
 		}
 	}
+
+#ifdef __SWITCH__
+	// Robust direct stick->axis feed for the Switch: bypass the fragile
+	// key-translation/ramp path and drive the four movement/look axes straight
+	// from the sticks every frame. Mapping matches the default j_*_axis:
+	//   engine axis 0 = side (LEFTX), 1 = forward (LEFTY),
+	//                2 = yaw (RIGHTX), 3 = pitch (RIGHTY).
+	// Runs last so it is authoritative. Harmless in menus (CL_JoystickMove is
+	// only applied while building usercmds in-game).
+	{
+		static const SDL_GameControllerAxis nxAxis[4] = {
+			SDL_CONTROLLER_AXIS_LEFTX,  SDL_CONTROLLER_AXIS_LEFTY,
+			SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY
+		};
+		int e;
+		for (e = 0; e < 4; e++) {
+			int v = SDL_GameControllerGetAxis(gamepad, nxAxis[e]);
+			if (abs(v) < 4000) {
+				v = 0; // dead zone (covers Joy-Con stick drift)
+			} else if (e >= 2) {
+				// Quadratic response on the look stick (right) for finer aim
+				// precision near centre, full speed at the edges.
+				v = (int)((float)v * ((float)abs(v) / 32767.0f));
+			}
+			// Set the engine axis directly. Going through Com_QueueEvent /
+			// SE_JOYSTICK_AXIS did not land cl.joystickAxis here, so call the
+			// handler straight away - it just writes cl.joystickAxis[e].
+			CL_JoystickEvent(e, v, in_eventTime);
+		}
+	}
+#endif
 }
 
 
@@ -1147,6 +1232,25 @@ static void IN_ProcessEvents( void )
 				}
 				break;
 
+#ifdef __SWITCH__
+			case SDL_FINGERDOWN:
+			case SDL_FINGERMOTION:
+			case SDL_FINGERUP:
+				{
+					// Touch drives the virtual cursor absolutely (tap-to-position);
+					// a tap is a left click. tfinger coords are normalised 0..1.
+					int w = cls.glconfig.vidWidth  ? cls.glconfig.vidWidth  : 1280;
+					int h = cls.glconfig.vidHeight ? cls.glconfig.vidHeight : 720;
+					nx_cursorX = (int)( e.tfinger.x * w );
+					nx_cursorY = (int)( e.tfinger.y * h );
+					if( e.type == SDL_FINGERDOWN )
+						Com_QueueEvent( in_eventTime, SE_KEY, K_MOUSE1, qtrue, 0, NULL );
+					else if( e.type == SDL_FINGERUP )
+						Com_QueueEvent( in_eventTime, SE_KEY, K_MOUSE1, qfalse, 0, NULL );
+				}
+				break;
+#endif
+
 			case SDL_MOUSEWHEEL:
 				if( e.wheel.y > 0 )
 				{
@@ -1253,6 +1357,24 @@ void IN_Frame( void )
 	// If not DISCONNECTED (main menu) or ACTIVE (in game), we're loading
 	loading = ( clc.state != CA_DISCONNECTED && clc.state != CA_ACTIVE );
 
+#ifdef __SWITCH__
+	{
+		// Boost the CPU clock while still booting or while loading a level, and
+		// run at normal clocks in menus and during gameplay (FastLoad throttles
+		// the GPU, so it must never be left on while playing).
+		extern qboolean com_fullyInitialized;
+		extern void     NX_SetCpuBoost(int on);
+		extern int      NX_OperationModeChanged(void);
+		NX_SetCpuBoost( ( !com_fullyInitialized || loading ) ? 1 : 0 );
+
+		// Dock/undock -> re-pick 720p (handheld) or 1080p (docked) via a
+		// vid_restart (queued, so it runs at a frame boundary, not mid-input).
+		if ( com_fullyInitialized && NX_OperationModeChanged( ) ) {
+			Cbuf_AddText( "vid_restart\n" );
+		}
+	}
+#endif
+
 	// update isFullscreen since it might of changed since the last vid_restart
 	cls.glconfig.isFullscreen = Cvar_VariableIntegerValue( "r_fullscreen" ) != 0;
 
@@ -1312,14 +1434,22 @@ void IN_Init( void *windowData )
 	in_mouse = Cvar_Get( "in_mouse", "1", CVAR_ARCHIVE );
 	in_nograb = Cvar_Get( "in_nograb", "0", CVAR_ARCHIVE );
 
+#ifdef __SWITCH__
+	in_joystick = Cvar_Get( "in_joystick", "1", CVAR_ARCHIVE|CVAR_LATCH );
+#else
 	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE|CVAR_LATCH );
+#endif
 	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE );
 
 #if defined(PROTOCOL_HANDLER) && defined(__APPLE__)
 	SDL_EventState( SDL_DROPFILE, SDL_ENABLE );
 #endif
 
+#ifndef __SWITCH__
+	// On the Switch this immediately pops up the on-screen keyboard (swkbd),
+	// which is unwanted at boot. Text entry there is handled on demand instead.
 	SDL_StartTextInput( );
+#endif
 
 	mouseAvailable = ( in_mouse->value != 0 );
 	IN_DeactivateMouse( Cvar_VariableIntegerValue( "r_fullscreen" ) != 0 );

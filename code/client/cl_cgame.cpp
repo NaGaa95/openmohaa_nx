@@ -548,7 +548,13 @@ void CL_ShutdownCGame( void ) {
 		re.FreeModels();
 	}
 
+#ifndef __SWITCH__
 	Z_FreeTags( TAG_CGAME );
+#else
+	// Switch: cgame is statically linked (never reloaded), so its C++ statics
+	// persist and point into TAG_CGAME. Wiping it here would dangle them and
+	// crash on the next map's cgame init. Same rationale as SV_ShutdownGameProgs.
+#endif
 }
 
 static int	FloatAsInt( float f ) {

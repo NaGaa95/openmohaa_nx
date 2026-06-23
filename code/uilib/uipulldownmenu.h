@@ -58,7 +58,16 @@ protected:
     Container<uipull_describe *> m_desc;
     Listener                    *m_listener;
     int                          m_submenu;
-    UIPopupMenu                 *m_submenuptr;
+    // SafePtr, not a raw pointer: the submenu can be torn down by an unrelated
+    // path (e.g. a video-settings change rebuilding the UI mid-event) while
+    // m_submenu is still set. A raw pointer then dangles and the next
+    // Disconnect/delete crashes; a SafePtr auto-nulls on the submenu's
+    // destruction, so the guarded uses below simply skip it.
+    SafePtr<UIPopupMenu>         m_submenuptr;
+    // __SWITCH__ touch: a tap is an instant press+release, which would open and
+    // immediately close the submenu. When a tap opens it we set this so the
+    // matching release keeps it open; the next tap then lands on an item.
+    bool                         m_bTouchJustOpened;
     UColor                       m_highlightBGColor;
     UColor                       m_highlightFGColor;
 

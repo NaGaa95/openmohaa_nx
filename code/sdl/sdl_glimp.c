@@ -463,6 +463,20 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 
 	ri.Printf (PRINT_ALL, "...setting mode %d:", mode );
 
+#ifdef __SWITCH__
+	// Switch: always render at the console's native resolution - 720p in
+	// handheld, 1080p docked - regardless of r_mode. NX_GetDisplayResolution()
+	// reads the live operation mode (openmohaa_nx/source/nx_app.c); a dock/
+	// undock triggers a vid_restart which re-runs this with the new size.
+	{
+		extern void NX_GetDisplayResolution(int *w, int *h);
+		int nxw = 1280, nxh = 720;
+		NX_GetDisplayResolution( &nxw, &nxh );
+		glConfig.vidWidth     = nxw;
+		glConfig.vidHeight    = nxh;
+		glConfig.windowAspect = (float)nxw / (float)nxh;
+	}
+#else
 	if (mode == -2)
 	{
 		// use desktop video resolution
@@ -486,6 +500,7 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 		ri.Printf( PRINT_ALL, " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
+#endif
 	ri.Printf( PRINT_ALL, " %d %d\n", glConfig.vidWidth, glConfig.vidHeight);
 
 	// Center window

@@ -34,7 +34,15 @@ static byte *cursor_image_data = NULL;
 static pCursorFree cursor_free = NULL;
 
 void IN_GetMousePosition(int *x, int *y) {
+#ifdef __SWITCH__
+    /* The Switch has no real mouse; the UI cursor is a virtual cursor driven by
+       the touchscreen and the right stick (see sdl_input.c). */
+    extern int nx_cursorX, nx_cursorY;
+    *x = nx_cursorX;
+    *y = nx_cursorY;
+#else
     SDL_GetMouseState(x, y);
+#endif
 }
 
 qboolean IN_SetCursorFromImage(const byte *pic, int width, int height, pCursorFree cursorFreeFn) {

@@ -844,10 +844,21 @@ screen to let the user know about it, then dump all client
 memory on the hunk from cgame, ui, and renderer
 =====================
 */
+#ifdef __SWITCH__
+extern "C" void NX_SetCpuBoost(int on);
+#endif
+
 void CL_MapLoading( qboolean flush, const char *pszMapName ) {
 	if ( !com_cl_running->integer ) {
 		return;
 	}
+
+#ifdef __SWITCH__
+	// Kick the CPU into boost the instant a load starts (synchronously, before
+	// the blocking load), rather than waiting for the next IN_Frame() which can
+	// be a third of the way into the loading screen.
+	NX_SetCpuBoost(1);
+#endif
 
 	UI_ClearState();
 	UI_ForceMenuOff(false);

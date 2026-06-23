@@ -1,0 +1,22 @@
+# Build output
+build/
+*.elf
+*.nro
+*.nso
+*.nacp
+
+# Generated parser / version headers
+generated/
+
+# Game assets must never be committed (copyrighted)
+romfs/main/*.pk3
+romfs/main/pak*.pk3
+romfs/mainta/
+romfs/maintt/
+
+# Build logs
+*.log
+
+# Editor / OS cruft
+*.swp
+.DS_Store

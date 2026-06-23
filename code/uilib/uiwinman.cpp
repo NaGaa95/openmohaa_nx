@@ -261,12 +261,24 @@ void UIWindowManager::UpdateViews(void)
 
         // Added in OPM
         //  Draw the mouse if it has been grabbed
+        //  On the Switch there is no grabbed/relative mouse - the cursor is a
+        //  virtual cursor driven by touch/right-stick (see sdl_input.c), so it
+        //  must always be drawn while the UI owns the mouse.
+#ifdef __SWITCH__
+        if (1) {
+            VectorSet4(col, 1, 1, 1, 1);
+            uii.Rend_SetColor(col);
+
+            uii.Rend_DrawPicStretched(uid.mouseX, uid.mouseY, 24, 24, 0, 0, 1, 1, m_cursor->GetMaterial());
+        }
+#else
         if (IN_IsCursorActive()) {
             VectorSet4(col, 1, 1, 1, 1);
             uii.Rend_SetColor(col);
 
             uii.Rend_DrawPicStretched(uid.mouseX, uid.mouseY, 0, 0, 0, 0, 1, 1, m_cursor->GetMaterial());
         }
+#endif
 
         m_font->setColor(UWhite);
 

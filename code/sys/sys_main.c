@@ -241,7 +241,12 @@ Sys_InitPIDFile
 */
 void Sys_InitPIDFile( const char *gamedir ) {
 	if( Sys_WritePIDFile( gamedir ) ) {
-#ifndef DEDICATED
+// On the Switch the app is almost never shut down cleanly (it's closed from the
+// HOME menu), so the PID file is always left behind and this would false-trigger
+// every launch - forcing "safe" 640x480 video settings and wiping the user's
+// resolution. Skip the abnormal-exit prompt there; the renderer picks the
+// native resolution itself (see GLimp_SetMode).
+#if !defined(DEDICATED) && !defined(__SWITCH__)
 		char message[1024];
 		char modName[MAX_OSPATH];
 
@@ -887,6 +892,19 @@ int main( int argc, char **argv )
 
 #ifdef __EMSCRIPTEN__
 	emscripten_set_main_loop( Com_Frame, 0, 1 );
+#elif defined(__SWITCH__)
+	{
+		extern int  NX_AppShouldRun( void );
+		extern void Com_WriteConfiguration( void );
+		// Loop until the system asks us to quit (HOME menu -> Close). The old
+		// while(1) ignored that request, so the app was force-killed and never
+		// wrote its config - which is why video settings never persisted.
+		while( NX_AppShouldRun( ) )
+		{
+			Com_Frame( );
+		}
+		Com_WriteConfiguration( );
+	}
 #else
 	while( 1 )
 	{

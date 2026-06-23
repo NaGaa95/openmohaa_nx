@@ -22,6 +22,25 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../uilib/ui_local.h"
 
+#ifdef __SWITCH__
+// NX_HeapPtrLive (Switch heap guard) returns 0 for a null/freed/non-heap pointer.
+// Guard `delete e` against a recycled m_events entry whose vtable is clobbered:
+// require a live block and a sane vtable before dispatching the virtual dtor.
+extern "C" int NX_HeapPtrLive(const void *p);
+
+static inline bool UI_EventDeletable(Event *e)
+{
+    if (!e || !NX_HeapPtrLive(e)) {
+        return false;
+    }
+    void *const *vt = *reinterpret_cast<void *const *const *>(e);
+    return vt && vt[0] && vt[1];
+}
+#  define UI_EVENT_DELETABLE(e) UI_EventDeletable(e)
+#else
+#  define UI_EVENT_DELETABLE(e) ((e) != NULL)
+#endif
+
 UConnection::UConnection()
 {
 }
@@ -90,7 +109,21 @@ bool UConnection::RemoveListener
 	}
 
 	i = m_listeners.IndexOfObject( ptr );
-	delete m_events.ObjectAt( i );
+
+	// Defensive: the listener and event lists must stay in lock-step. If they
+	// ever desync (observed crashing on the Switch when closing video-settings
+	// pulldowns), skip the stale delete instead of dereferencing garbage.
+	if( i < 1 || i > m_events.NumObjects() )
+	{
+		m_listeners.RemoveObjectAt( i );
+		return false;
+	}
+
+	{
+		Event *e = m_events.ObjectAt( i );
+		if( UI_EVENT_DELETABLE( e ) )
+			delete e;
+	}
 	m_events.RemoveObjectAt( i );
 	m_listeners.RemoveObjectAt( i );
 
@@ -133,7 +166,8 @@ bool UConnection::SendEvent
 		else
 		{
 			Event *e = m_events.ObjectAt( i );
-			delete e;
+			if( UI_EVENT_DELETABLE( e ) )
+				delete e;
 
 			m_listeners.RemoveObjectAt( i );
 			m_events.RemoveObjectAt( i );

@@ -576,6 +576,10 @@ This is NOT called for map_restart
 ================
 */
 void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qboolean bTransition ) {
+#ifdef __SWITCH__
+	// Boost the CPU through the (heavy, blocking) server-side map load.
+	{ extern void NX_SetCpuBoost(int on); NX_SetCpuBoost(1); }
+#endif
 	int			i;
 	int			iStart;
 	int			iEnd;
