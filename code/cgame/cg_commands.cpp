@@ -1459,30 +1459,75 @@ qboolean ClientGameCommandManager::PostEventForEntity(Event *ev, float fWait)
     return qtrue;
 }
 
-void ClientGameCommandManager::SetBaseAndAmplitude(Event *ev, Vector& base, Vector& amplitude)
+qboolean ClientGameCommandManager::SetBaseAndAmplitude(Event *ev, Vector& base, Vector& amplitude)
 {
-    int i = 1;
-    int j = 0;
+    int    i = 1;
+    int    j = 0;
+    int    num = ev->NumArgs();
+    Vector newBase = base;
+    Vector newAmplitude = amplitude;
 
     for (j = 0; j < 3; j++) {
         str org;
 
+        if (i > num) {
+            warning(
+                "ClientGameCommandManager::SetBaseAndAmplitude",
+                "Missing vector component %d for command '%s'",
+                j + 1,
+                ev->getName()
+            );
+            return qfalse;
+        }
+
         org = ev->GetString(i++);
         if (org == "crandom") {
-            float value  = ev->GetFloat(i++);
-            base[j]      = -value;
-            amplitude[j] = value + value;
+            if (i > num) {
+                warning(
+                    "ClientGameCommandManager::SetBaseAndAmplitude",
+                    "Missing value after crandom in command '%s'",
+                    ev->getName()
+                );
+                return qfalse;
+            }
+
+            float value      = ev->GetFloat(i++);
+            newBase[j]       = -value;
+            newAmplitude[j]  = value + value;
         } else if (org == "random") {
-            base[j]      = 0.0;
-            amplitude[j] = ev->GetFloat(i++);
+            if (i > num) {
+                warning(
+                    "ClientGameCommandManager::SetBaseAndAmplitude",
+                    "Missing value after random in command '%s'",
+                    ev->getName()
+                );
+                return qfalse;
+            }
+
+            newBase[j]      = 0.0;
+            newAmplitude[j] = ev->GetFloat(i++);
         } else if (org == "range") {
-            base[j]      = ev->GetFloat(i++);
-            amplitude[j] = ev->GetFloat(i++);
+            if (i + 1 > num) {
+                warning(
+                    "ClientGameCommandManager::SetBaseAndAmplitude",
+                    "Missing range values in command '%s'",
+                    ev->getName()
+                );
+                return qfalse;
+            }
+
+            newBase[j]      = ev->GetFloat(i++);
+            newAmplitude[j] = ev->GetFloat(i++);
         } else {
-            base[j]      = atof(org.c_str());
-            amplitude[j] = 0.0;
+            newBase[j]      = atof(org.c_str());
+            newAmplitude[j] = 0.0;
         }
     }
+
+    base      = newBase;
+    amplitude = newAmplitude;
+
+    return qtrue;
 }
 
 //=============
@@ -1491,9 +1536,33 @@ void ClientGameCommandManager::SetBaseAndAmplitude(Event *ev, Vector& base, Vect
 ClientGameCommandManager::ClientGameCommandManager()
 {
     m_seed = 0;
+    m_spawnthing   = NULL;
+    m_pCurrentSfx  = NULL;
+    m_fEventWait   = 0;
+    endblockfcn    = NULL;
 
     InitializeTempModels();
     InitializeEmitters();
+}
+
+ClientGameCommandManager::CommandState ClientGameCommandManager::SaveCommandState(void) const
+{
+    CommandState state;
+
+    state.spawnthing = m_spawnthing;
+    state.currentSfx = m_pCurrentSfx;
+    state.eventWait  = m_fEventWait;
+    state.endblock   = endblockfcn;
+
+    return state;
+}
+
+void ClientGameCommandManager::RestoreCommandState(const CommandState& state)
+{
+    m_spawnthing  = state.spawnthing;
+    m_pCurrentSfx = state.currentSfx;
+    m_fEventWait  = state.eventWait;
+    endblockfcn   = state.endblock;
 }
 
 void ClientGameCommandManager::Print(Event *ev)
@@ -2320,7 +2389,9 @@ void ClientGameCommandManager::SetOffsetAlongAxis(Event *ev)
         return;
     }
 
-    SetBaseAndAmplitude(ev, m_spawnthing->axis_offset_base, m_spawnthing->axis_offset_amplitude);
+    if (!SetBaseAndAmplitude(ev, m_spawnthing->axis_offset_base, m_spawnthing->axis_offset_amplitude)) {
+        return;
+    }
 }
 
 void ClientGameCommandManager::SetCone(Event *ev)
@@ -2343,7 +2414,9 @@ void ClientGameCommandManager::SetOriginOffset(Event *ev)
         return;
     }
 
-    SetBaseAndAmplitude(ev, m_spawnthing->origin_offset_base, m_spawnthing->origin_offset_amplitude);
+    if (!SetBaseAndAmplitude(ev, m_spawnthing->origin_offset_base, m_spawnthing->origin_offset_amplitude)) {
+        return;
+    }
 }
 
 //=============
@@ -2696,20 +2769,18 @@ void ClientGameCommandManager::SetGlobalFade(Event *ev)
 //=============
 void ClientGameCommandManager::SetRandomVelocity(Event *ev)
 {
-    int    i = 1;
-    int    j = 0;
-    Vector randval;
-    str    vel;
-
     if (!m_spawnthing) {
         return;
     }
 
     if (ev->NumArgs() < 3) {
         warning("ClientGameCommandManager::SetRandomVelocity", "Expecting at least 3 args for command randvel");
+        return;
     }
 
-    SetBaseAndAmplitude(ev, m_spawnthing->randvel_base, m_spawnthing->randvel_amplitude);
+    if (!SetBaseAndAmplitude(ev, m_spawnthing->randvel_base, m_spawnthing->randvel_amplitude)) {
+        return;
+    }
 
     m_spawnthing->cgd.flags2 |= T2_MOVE;
 }
@@ -2771,20 +2842,18 @@ void ClientGameCommandManager::SetVelocity(Event *ev)
 //=============
 void ClientGameCommandManager::SetAngularVelocity(Event *ev)
 {
-    int    i = 1;
-    int    j = 0;
-    Vector randval;
-    str    vel;
-
     if (!m_spawnthing) {
         return;
     }
 
     if (ev->NumArgs() < 3) {
         warning("ClientGameCommandManager::SetAngularVelocity", "Expecting at least 3 args for command randvel");
+        return;
     }
 
-    SetBaseAndAmplitude(ev, m_spawnthing->avelocity_base, m_spawnthing->avelocity_amplitude);
+    if (!SetBaseAndAmplitude(ev, m_spawnthing->avelocity_base, m_spawnthing->avelocity_amplitude)) {
+        return;
+    }
 
     m_spawnthing->cgd.flags2 |= T2_AMOVE;
 }
@@ -2794,20 +2863,18 @@ void ClientGameCommandManager::SetAngularVelocity(Event *ev)
 //=============
 void ClientGameCommandManager::SetAngles(Event *ev)
 {
-    int    i = 1;
-    int    j = 0;
-    Vector randval;
-    str    vel;
-
     if (!m_spawnthing) {
         return;
     }
 
     if (ev->NumArgs() < 3) {
         warning("ClientGameCommandManager::SetAngles", "Expecting at least 3 args for command randvel");
+        return;
     }
 
-    SetBaseAndAmplitude(ev, m_spawnthing->cgd.angles, m_spawnthing->angles_amplitude);
+    if (!SetBaseAndAmplitude(ev, m_spawnthing->cgd.angles, m_spawnthing->angles_amplitude)) {
+        return;
+    }
 
     // Set the tag axis
     m_spawnthing->cgd.flags |= T_ANGLES;
@@ -2964,10 +3031,19 @@ void ClientGameCommandManager::SetModel(Event *ev)
     int i;
     int num = ev->NumArgs();
 
+    if (num < 1) {
+        warning(
+            "CCG::SetModel",
+            "No model specified in model command for '%s'.\n",
+            current_tiki ? cgi.TIKI_Name(current_tiki) : "<no tiki>"
+        );
+        return;
+    }
+
     for (i = 1; i <= num; i++) {
         str s_arg(ev->GetString(i));
         m_spawnthing->m_modellist.AddObject(s_arg);
-        CacheResource(ev->GetString(i));
+        CacheResource(s_arg.c_str());
     }
 }
 
@@ -3036,7 +3112,9 @@ spawnthing_t *ClientGameCommandManager::InitializeSpawnthing(spawnthing_t *sp)
     int i;
 
     // Initalize m_spawnthing - these can be overidden with other commands
+    sp->ResetEmitterState();
     sp->m_modellist.ClearObjectList();
+    sp->m_taglist.ClearObjectList();
     AxisClear(sp->axis);
     AxisClear(sp->tag_axis);
 
@@ -3104,7 +3182,7 @@ spawnthing_t *ClientGameCommandManager::InitializeSpawnthing(spawnthing_t *sp)
     sp->cgd.parent             = -1;
     sp->cgd.tiki               = nullptr;
     sp->cgd.lightstyle         = -1;
-    sp->cgd.physicsRate        = cg_effect_physicsrate->integer;
+    sp->cgd.physicsRate        = cg_effect_physicsrate ? cg_effect_physicsrate->integer : 10;
     sp->cgd.shadername         = "beamshader";
     sp->cgd.decal_orientation  = 0;
     sp->cgd.decal_radius       = 10;
@@ -3117,10 +3195,15 @@ spawnthing_t *ClientGameCommandManager::InitializeSpawnthing(spawnthing_t *sp)
     sp->cgd.spin_rotation      = 0;
     sp->fMinRangeSquared       = 0;
     sp->fMaxRangeSquared       = 9.9999997e37f;
+    sp->lastTime               = 0;
+    sp->dlight                 = qfalse;
+    sp->touchfcn               = NULL;
 
     for (i = 0; i < 3; i++) {
         sp->dcolor[i]    = 1.0f;
         sp->cgd.color[i] = 1.0;
+        sp->linked_origin[i] = 0.0f;
+        VectorClear(sp->linked_axis[i]);
     }
 
     sp->cgd.color[3] = 1.0;
@@ -3781,7 +3864,27 @@ void ClientGameCommandManager::EndOriginBeamSpawn(void)
 //=============
 // InitializeEmitters
 //=============
-void ClientGameCommandManager::InitializeEmitters(void) {}
+void ClientGameCommandManager::InitializeEmitters(void)
+{
+    int i;
+
+    for (i = m_emitters.NumObjects(); i > 0; i--) {
+        delete m_emitters.ObjectAt(i);
+    }
+
+    m_emitters.ClearObjectList();
+    m_spawnthing = NULL;
+    InitializeSpawnthing(&m_localemitter);
+}
+
+void ClientGameCommandManager::InitializeCommandTimeManager(void)
+{
+    m_command_time_manager.ResetCommandTimes();
+    m_pCurrentSfx             = NULL;
+    m_iLastVSSRepulsionTime   = 0;
+    m_fEventWait              = 0;
+    endblockfcn               = NULL;
+}
 
 //===============
 // EmitterOn
@@ -5163,6 +5266,7 @@ void CG_ProcessInitCommands(dtiki_t *tiki, refEntity_t *ent)
     refEntity_t *old_entity;
     dtiki_t     *old_tiki;
     dtikicmd_t  *pcmd;
+    ClientGameCommandManager::CommandState old_state;
 
     if (!tiki) {
         return;
@@ -5170,6 +5274,7 @@ void CG_ProcessInitCommands(dtiki_t *tiki, refEntity_t *ent)
 
     old_entity     = current_entity;
     old_tiki       = current_tiki;
+    old_state      = commandManager.SaveCommandState();
     current_entity = ent;
     current_tiki   = tiki;
 
@@ -5178,6 +5283,9 @@ void CG_ProcessInitCommands(dtiki_t *tiki, refEntity_t *ent)
 
         pcmd     = &tiki->a->client_initcmds[i];
         num_args = pcmd->num_args;
+        if (num_args <= 0 || !pcmd->args || !pcmd->args[0] || !pcmd->args[0][0]) {
+            continue;
+        }
 
         // Create the event and Process it.
         ev = new Event(pcmd->args[0]);
@@ -5195,6 +5303,7 @@ void CG_ProcessInitCommands(dtiki_t *tiki, refEntity_t *ent)
 
     current_entity = old_entity;
     current_tiki   = old_tiki;
+    commandManager.RestoreCommandState(old_state);
 }
 
 //=================
@@ -5207,6 +5316,7 @@ void CG_ProcessCacheInitCommands(dtiki_t *tiki)
     refEntity_t *old_entity;
     dtiki_t     *old_tiki;
     dtikicmd_t  *pcmd;
+    ClientGameCommandManager::CommandState old_state;
 
     if (!tiki) {
         return;
@@ -5214,6 +5324,7 @@ void CG_ProcessCacheInitCommands(dtiki_t *tiki)
 
     old_entity     = current_entity;
     old_tiki       = current_tiki;
+    old_state      = commandManager.SaveCommandState();
     current_entity = NULL;
     current_tiki   = tiki;
 
@@ -5222,6 +5333,9 @@ void CG_ProcessCacheInitCommands(dtiki_t *tiki)
 
         pcmd     = &tiki->a->client_initcmds[i];
         num_args = pcmd->num_args;
+        if (num_args <= 0 || !pcmd->args || !pcmd->args[0] || !pcmd->args[0][0]) {
+            continue;
+        }
 
         // Create the event and Process it.
         ev = new Event(pcmd->args[0]);
@@ -5245,6 +5359,7 @@ void CG_ProcessCacheInitCommands(dtiki_t *tiki)
 
     current_entity = old_entity;
     current_tiki   = old_tiki;
+    commandManager.RestoreCommandState(old_state);
 }
 
 void CG_EndTiki(dtiki_t *tiki)
@@ -5458,6 +5573,8 @@ void CG_InitializeCommandManager(void)
     cg_showemitters = cgi.Cvar_Get("cg_showemitters", "0", 0);
     commandManager.InitializeTempModelCvars();
     commandManager.InitializeVSSCvars();
+    commandManager.ResetPendingEvents();
+    commandManager.InitializeCommandTimeManager();
     commandManager.InitializeTempModels();
     commandManager.InitializeVSSSources();
     commandManager.InitializeEmitters();
@@ -6076,6 +6193,11 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     m_localemitter.ArchiveToMemory(archiver);
 
     if (archiver.IsReading()) {
+        for (i = m_emitters.NumObjects(); i > 0; i--) {
+            delete m_emitters.ObjectAt(i);
+        }
+        m_emitters.ClearObjectList();
+
         archiver.ArchiveInteger(&num);
 
         for (i = 0; i < num; i++) {
@@ -6142,6 +6264,7 @@ void commandthing_t::ArchiveToMemory(MemArchiver& archiver)
 
     if (archiver.IsReading()) {
         archiver.ArchiveInteger(&num);
+        m_commandtimes.ClearObjectList();
 
         for (i = 0; i < num; i++) {
             commandtime_t ct;
@@ -6153,9 +6276,8 @@ void commandthing_t::ArchiveToMemory(MemArchiver& archiver)
         num = m_commandtimes.NumObjects();
 
         archiver.ArchiveInteger(&num);
-        m_commandtimes.ClearObjectList();
 
-        for (i = 0; i < num; i++) {
+        for (i = 1; i <= num; i++) {
             commandtime_t& ct = m_commandtimes.ObjectAt(i);
 
             ct.ArchiveToMemory(archiver);
@@ -6247,6 +6369,7 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
         emittertime_t et;
 
         archiver.ArchiveInteger(&num);
+        m_emittertimes.ClearObjectList();
         for (i = 0; i < num; i++) {
             et.ArchiveToMemory(archiver);
             m_emittertimes.AddObject(et);

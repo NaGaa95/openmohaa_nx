@@ -44,12 +44,33 @@ extern Event EV_Client_Swipe;
 extern Event EV_Client_SwipeOn;
 extern Event EV_Client_SwipeOff;
 
+static void CG_ResetTempModelState(ctempmodel_t *p)
+{
+    p->cgd = cg_common_data();
+    p->modelname = "";
+    memset(&p->lastEnt, 0, sizeof(p->lastEnt));
+    memset(&p->ent, 0, sizeof(p->ent));
+
+    p->number                = 0;
+    p->lastAnimTime          = 0;
+    p->lastPhysicsTime       = 0;
+    p->killTime              = 0;
+    p->next_bouncesound_time = 0;
+    p->seed                  = 0;
+    p->twinkleTime           = 0;
+    p->aliveTime             = 0;
+    p->addedOnce             = qfalse;
+    p->lastEntValid          = qfalse;
+    p->m_spawnthing          = NULL;
+}
+
 //=============
 // AllocateTempModel
 //=============
 ctempmodel_t *ClientGameCommandManager::AllocateTempModel(void)
 {
     ctempmodel_t *p;
+    ctempmodel_t *nextFree;
 
     p = m_free_tempmodels;
     if (!p) {
@@ -57,7 +78,9 @@ ctempmodel_t *ClientGameCommandManager::AllocateTempModel(void)
         return NULL;
     }
 
-    m_free_tempmodels = m_free_tempmodels->next;
+    nextFree = p->next;
+    m_free_tempmodels = nextFree;
+    CG_ResetTempModelState(p);
 
     // link into the active list
     p->next                        = m_active_tempmodels.next;
@@ -88,10 +111,6 @@ void ClientGameCommandManager::FreeTempModel(ctempmodel_t *p)
     p->prev->next = p->next;
     p->next->prev = p->prev;
 
-    // the free list is only singly linked
-    p->next           = m_free_tempmodels;
-    m_free_tempmodels = p;
-
     if (p->m_spawnthing) {
         p->m_spawnthing->numtempmodels--;
         // delete unused spawnthings
@@ -107,6 +126,13 @@ void ClientGameCommandManager::FreeTempModel(ctempmodel_t *p)
 
         p->m_spawnthing = NULL;
     }
+
+    CG_ResetTempModelState(p);
+
+    // the free list is only singly linked
+    p->prev           = NULL;
+    p->next           = m_free_tempmodels;
+    m_free_tempmodels = p;
 }
 
 //===============
@@ -221,8 +247,12 @@ void ClientGameCommandManager::InitializeTempModels(void)
     m_free_tempmodels = &m_tempmodels[0];
 
     for (i = 0; i < numtempmodels - 1; i++) {
+        CG_ResetTempModelState(&m_tempmodels[i]);
+        m_tempmodels[i].prev = NULL;
         m_tempmodels[i].next = &m_tempmodels[i + 1];
     }
+    CG_ResetTempModelState(&m_tempmodels[numtempmodels - 1]);
+    m_tempmodels[numtempmodels - 1].prev = NULL;
     m_tempmodels[numtempmodels - 1].next = NULL;
 }
 

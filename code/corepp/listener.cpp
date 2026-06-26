@@ -2251,7 +2251,11 @@ Event::Event(const Event& ev)
     dataSize    = ev.dataSize;
     maxDataSize = ev.maxDataSize;
 
-    if (dataSize) {
+    if (maxDataSize < dataSize) {
+        maxDataSize = dataSize;
+    }
+
+    if (maxDataSize) {
         data = new ScriptVariable[maxDataSize];
 
         for (int i = 0; i < dataSize; i++) {
@@ -2418,14 +2422,22 @@ Event::~Event()
 
 Event& Event::operator=(const Event& ev)
 {
+    if (this == &ev) {
+        return *this;
+    }
+
     Clear();
     fromScript  = ev.fromScript;
     eventnum    = ev.eventnum;
     dataSize    = ev.dataSize;
     maxDataSize = ev.maxDataSize;
 
-    if (dataSize) {
-        data = new ScriptVariable[dataSize];
+    if (maxDataSize < dataSize) {
+        maxDataSize = dataSize;
+    }
+
+    if (maxDataSize) {
+        data = new ScriptVariable[maxDataSize];
 
         for (int i = 0; i < dataSize; i++) {
             data[i] = ev.data[i];
@@ -2443,6 +2455,10 @@ Event& Event::operator=(const Event& ev)
 
 Event& Event::operator=(Event&& ev)
 {
+    if (this == &ev) {
+        return *this;
+    }
+
     Clear();
     fromScript  = ev.fromScript;
     eventnum    = ev.eventnum;
@@ -2628,7 +2644,20 @@ SetValue
 */
 void Event::CopyValues(const ScriptVariable *values, size_t count)
 {
-    assert(count <= maxDataSize);
+    if (!count) {
+        dataSize = 0;
+        if (!data) {
+            maxDataSize = 0;
+        }
+        return;
+    }
+
+    if (count > maxDataSize || !data) {
+        delete[] data;
+
+        data        = count ? new ScriptVariable[count] : NULL;
+        maxDataSize = count;
+    }
 
     for (size_t i = 0; i < count; i++) {
         data[i] = values[i];
@@ -2646,11 +2675,11 @@ void Event::Clear(void)
 {
     if (data) {
         delete[] data;
-
-        data        = NULL;
-        dataSize    = 0;
-        maxDataSize = 0;
     }
+
+    data        = NULL;
+    dataSize    = 0;
+    maxDataSize = 0;
 }
 
 /*
@@ -2819,7 +2848,7 @@ ScriptVariable& Event::GetValue(void)
         return data[0];
     }
 
-    if (dataSize == maxDataSize) {
+    if (!data || dataSize == maxDataSize) {
         tmp = data;
 
         maxDataSize += 3;

@@ -430,6 +430,7 @@ public:
 
 protected:
     qboolean     usedNumbers[256];
+    void         ResetTracking();
     virtual void RemoveEntity(int entnum);
 
 public:
@@ -437,6 +438,11 @@ public:
 };
 
 inline enttracker_t::enttracker_t()
+{
+    memset(usedNumbers, 0, sizeof(usedNumbers));
+}
+
+inline void enttracker_t::ResetTracking()
 {
     memset(usedNumbers, 0, sizeof(usedNumbers));
 }
@@ -501,11 +507,19 @@ protected:
 public:
     emittertime_t *GetEmitTime(int entnum);
     virtual void   RemoveEntity(int entnum);
+    void           ResetEmitterState();
     qboolean       startoff;
 
 public:
     void ArchiveToMemory(MemArchiver& archiver);
 };
+
+inline void emitterthing_t::ResetEmitterState()
+{
+    ResetTracking();
+    m_emittertimes.ClearObjectList();
+    startoff = qfalse;
+}
 
 inline void emitterthing_t::RemoveEntity(int entnum)
 {
@@ -578,9 +592,16 @@ class commandthing_t : public enttracker_t
 public:
     commandtime_t *GetLastCommandTime(int entnum, int commandnum);
     virtual void   RemoveEntity(int entnum);
+    void           ResetCommandTimes();
 
     void ArchiveToMemory(MemArchiver& archiver);
 };
+
+inline void commandthing_t::ResetCommandTimes()
+{
+    ResetTracking();
+    m_commandtimes.ClearObjectList();
+}
 
 inline void commandthing_t::RemoveEntity(int entnum)
 {
@@ -896,7 +917,7 @@ private:
     void          AnimateTempModel(ctempmodel_t *ent, Vector origin, refEntity_t *newEnt);
     void          OtherTempModelEffects(ctempmodel_t *p, Vector origin, refEntity_t *newEnt);
     qboolean      IsBlockCommand(const str& name);
-    void          SetBaseAndAmplitude(Event *ev, Vector& base, Vector& amplitude);
+    qboolean      SetBaseAndAmplitude(Event *ev, Vector& base, Vector& amplitude);
 
     // Beam stuff
     void SetSubdivisions(Event *ev);
@@ -929,6 +950,13 @@ private:
 public:
     CLASS_PROTOTYPE(ClientGameCommandManager);
 
+    struct CommandState {
+        spawnthing_t *spawnthing;
+        specialeffect_t *currentSfx;
+        float eventWait;
+        void (ClientGameCommandManager::*endblock)(void);
+    };
+
     ClientGameCommandManager();
     void AddTempModels(void);
     void UpdateEmitter(dtiki_t *tiki, vec3_t axis[3], int entity_number, int parent_number, Vector entity_origin);
@@ -952,6 +980,7 @@ public:
     void InitializeTempModels(void);
     void InitializeTempModelCvars(void);
     void InitializeEmitters(void);
+    void InitializeCommandTimeManager(void);
     void RemoveClientEntity(int number, dtiki_t *tiki, centity_t *cent, ctempmodel_t *p = NULL);
     void ClearSwipes(void);
     void FreeSpawnthing(spawnthing_t *sp);
@@ -959,6 +988,8 @@ public:
     void SpawnTempModel(int count, spawnthing_t *sp);
 
     inline void SetSpawnthing(spawnthing_t *st) { m_spawnthing = st; };
+    CommandState SaveCommandState(void) const;
+    void RestoreCommandState(const CommandState& state);
 
     spawnthing_t *CreateNewEmitter(str emittername);
     spawnthing_t *CreateNewEmitter(void);

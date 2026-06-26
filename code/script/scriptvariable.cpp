@@ -411,6 +411,11 @@ ScriptVariable::ScriptVariable(ScriptVariable&& variable)
     type          = variable.GetType();
     m_data        = variable.m_data;
     variable.type = VARIABLE_NONE;
+
+    if (type == VARIABLE_POINTER) {
+        m_data.pointerValue->add(this);
+        m_data.pointerValue->remove(&variable);
+    }
 }
 
 ScriptVariable::~ScriptVariable()

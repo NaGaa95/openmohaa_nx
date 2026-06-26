@@ -171,7 +171,7 @@ size_t TIKI_CalcAnimDefSize(dloaddef_t *ld)
 
         defsize += sizeof(dtikianimdef_t);
         defsize += loadanim->num_server_cmds * sizeof(dtikicmd_t);
-        defsize += loadanim->num_client_cmds * sizeof(dtikianimdef_t);
+        defsize += loadanim->num_client_cmds * sizeof(dtikicmd_t);
 
         for (j = 0; j < loadanim->num_server_cmds; j++) {
             const dloadframecmd_t *loadframecmd = loadanim->loadservercmds[j];

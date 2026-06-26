@@ -62,6 +62,9 @@ dtikianim_t *TIKI_FindTikiAnim(const char *path)
     if (tikianimcache) {
         dtikianim_t **t;
 
+        Q_strncpyz(filename, path, sizeof(filename));
+        FS_CanonicalFilename(filename);
+
         t = tikianimcache->find(filename);
         if (t) {
             return *t;

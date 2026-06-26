@@ -355,8 +355,9 @@ ScriptVM::ScriptVM(ScriptClass *scriptClass, unsigned char *pCodePos, ScriptThre
 */
 ScriptVM::~ScriptVM()
 {
-    fastEvent.data     = m_pOldData;
-    fastEvent.dataSize = m_OldDataSize;
+    fastEvent.data        = m_pOldData;
+    fastEvent.dataSize    = m_OldDataSize;
+    fastEvent.maxDataSize = m_OldDataSize;
 
     // clean-up the call stack
     while (callStack.NumObjects()) {
@@ -1957,8 +1958,9 @@ Sets the starting virtual machine parameters
 void ScriptVM::SetFastData(ScriptVariable *data, int dataSize)
 {
     if (fastEvent.data) {
-        fastEvent.data     = m_pOldData;
-        fastEvent.dataSize = m_OldDataSize;
+        fastEvent.data        = m_pOldData;
+        fastEvent.dataSize    = m_OldDataSize;
+        fastEvent.maxDataSize = m_OldDataSize;
 
         fastEvent.Clear();
 
@@ -1967,8 +1969,9 @@ void ScriptVM::SetFastData(ScriptVariable *data, int dataSize)
     }
 
     if (dataSize) {
-        fastEvent.data     = new ScriptVariable[dataSize];
-        fastEvent.dataSize = dataSize;
+        fastEvent.data        = new ScriptVariable[dataSize];
+        fastEvent.dataSize    = dataSize;
+        fastEvent.maxDataSize = dataSize;
 
         for (int i = 0; i < dataSize; i++) {
             fastEvent.data[i] = std::move(data[i]);

@@ -22,27 +22,21 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../uilib/ui_local.h"
 
-#ifdef __SWITCH__
-// NX_HeapPtrLive (Switch heap guard) returns 0 for a null/freed/non-heap pointer.
-// Guard `delete e` against a recycled m_events entry whose vtable is clobbered:
-// require a live block and a sane vtable before dispatching the virtual dtor.
-extern "C" int NX_HeapPtrLive(const void *p);
-
-static inline bool UI_EventDeletable(Event *e)
-{
-    if (!e || !NX_HeapPtrLive(e)) {
-        return false;
-    }
-    void *const *vt = *reinterpret_cast<void *const *const *>(e);
-    return vt && vt[0] && vt[1];
-}
-#  define UI_EVENT_DELETABLE(e) UI_EventDeletable(e)
-#else
-#  define UI_EVENT_DELETABLE(e) ((e) != NULL)
-#endif
-
 UConnection::UConnection()
 {
+}
+
+UConnection::~UConnection()
+{
+	int i;
+
+	for( i = m_events.NumObjects(); i > 0; i-- )
+	{
+		delete m_events.ObjectAt( i );
+	}
+
+	m_events.FreeObjectList();
+	m_listeners.FreeObjectList();
 }
 
 UConnection::UConnection(const Event& inevent, const Event& outevent)
@@ -110,20 +104,14 @@ bool UConnection::RemoveListener
 
 	i = m_listeners.IndexOfObject( ptr );
 
-	// Defensive: the listener and event lists must stay in lock-step. If they
-	// ever desync (observed crashing on the Switch when closing video-settings
-	// pulldowns), skip the stale delete instead of dereferencing garbage.
+	assert( i >= 1 && i <= m_events.NumObjects() );
 	if( i < 1 || i > m_events.NumObjects() )
 	{
 		m_listeners.RemoveObjectAt( i );
 		return false;
 	}
 
-	{
-		Event *e = m_events.ObjectAt( i );
-		if( UI_EVENT_DELETABLE( e ) )
-			delete e;
-	}
+	delete m_events.ObjectAt( i );
 	m_events.RemoveObjectAt( i );
 	m_listeners.RemoveObjectAt( i );
 
@@ -150,6 +138,13 @@ bool UConnection::SendEvent
 
 	for( i = n; i > 0; i-- )
 	{
+		assert( i <= m_events.NumObjects() );
+		if( i > m_events.NumObjects() )
+		{
+			m_listeners.RemoveObjectAt( i );
+			continue;
+		}
+
 		ptr = m_listeners.ObjectAt( i );
 		if( ptr )
 		{
@@ -165,9 +160,7 @@ bool UConnection::SendEvent
 		}
 		else
 		{
-			Event *e = m_events.ObjectAt( i );
-			if( UI_EVENT_DELETABLE( e ) )
-				delete e;
+			delete m_events.ObjectAt( i );
 
 			m_listeners.RemoveObjectAt( i );
 			m_events.RemoveObjectAt( i );
@@ -177,10 +170,31 @@ bool UConnection::SendEvent
 	return sent;
 }
 
+bool UConnection::Empty
+	(
+	void
+	) const
+
+{
+	return m_listeners.NumObjects() == 0;
+}
+
 CLASS_DECLARATION( Listener, USignal, NULL )
 {
 	{ NULL, NULL }
 };
+
+USignal::~USignal()
+{
+	int i;
+
+	for( i = m_connections.NumObjects(); i > 0; i-- )
+	{
+		delete m_connections.ObjectAt( i );
+	}
+
+	m_connections.FreeObjectList();
+}
 
 bool USignal::SendSignal
 	(
@@ -198,7 +212,15 @@ bool USignal::SendSignal
 		c = m_connections.ObjectAt( i );
 		if( c->TypeIs( ev ) )
 		{
-			return c->SendEvent( this, ev );
+			bool sent = c->SendEvent( this, ev );
+
+			if( c->Empty() )
+			{
+				m_connections.RemoveObjectAt( i );
+				delete c;
+			}
+
+			return sent;
 		}
 	}
 
@@ -228,9 +250,15 @@ bool USignal::Connect
 	}
 
 	c = new UConnection(inevent, outevent);
+	if( !c->AddListener( object, outevent ) )
+	{
+		delete c;
+		return false;
+	}
+
 	m_connections.AddObject( c );
 
-	return c->AddListener( object, outevent );
+	return true;
 }
 
 bool USignal::Disconnect
@@ -250,7 +278,15 @@ bool USignal::Disconnect
 		c = m_connections.ObjectAt( i );
 		if( c->TypeIs( ev ) )
 		{
-			return c->RemoveListener( object );
+			bool removed = c->RemoveListener( object );
+
+			if( c->Empty() )
+			{
+				m_connections.RemoveObjectAt( i );
+				delete c;
+			}
+
+			return removed;
 		}
 	}
 
@@ -271,12 +307,18 @@ bool USignal::Disconnect
 	result = false;
 
 	n = m_connections.NumObjects();
-	for( i = 1; i <= n; i++ )
+	for( i = n; i > 0; i-- )
 	{
 		c = m_connections.ObjectAt( i );
 		if( c->RemoveListener( object ) )
 		{
 			result = true;
+		}
+
+		if( c->Empty() )
+		{
+			m_connections.RemoveObjectAt( i );
+			delete c;
 		}
 	}
 
