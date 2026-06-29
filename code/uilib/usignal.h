@@ -33,14 +33,11 @@ class UConnection
 
 public:
     UConnection();
-    ~UConnection();
-
     UConnection(const Event& inevent, const Event& outevent);
     bool TypeIs(Event& ev);
     bool AddListener(Listener *object, Event& ev);
     bool RemoveListener(Listener *object);
     bool SendEvent(Listener *object, Event& ev);
-    bool Empty(void) const;
 };
 
 class USignal : public Listener
@@ -49,8 +46,6 @@ class USignal : public Listener
 
 public:
     CLASS_PROTOTYPE(USignal);
-
-    ~USignal() override;
 
     bool SendSignal(Event& ev);
     bool Connect(Listener *object, Event& inevent, Event& outevent);

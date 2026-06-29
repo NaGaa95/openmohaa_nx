@@ -26,6 +26,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #	include <SDL.h>
 #endif
 
+#ifdef __SWITCH__
+#	include <switch.h>
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,11 +66,198 @@ static cvar_t *in_joystickUseAnalog = NULL;
 // mouse to be ungrabbed (in_mouse 0), which is the Switch default.
 int nx_cursorX = 640;
 int nx_cursorY = 360;
+
+enum {
+	NX_GYRO_HANDHELD,
+	NX_GYRO_FULLKEY,
+	NX_GYRO_JOYDUAL_LEFT,
+	NX_GYRO_JOYDUAL_RIGHT,
+	NX_GYRO_JOYLEFT,
+	NX_GYRO_JOYRIGHT,
+	NX_GYRO_HANDLE_COUNT
+};
+
+static PadState nx_gyroPad;
+static HidSixAxisSensorHandle nx_gyroHandles[NX_GYRO_HANDLE_COUNT];
+static qboolean nx_gyroHandleActive[NX_GYRO_HANDLE_COUNT];
+static qboolean nx_gyroEnabled = qfalse;
+static int nx_gyroRetryTime = 0;
 #endif
 
 static int vidRestartTime = 0;
 
 static int in_eventTime = 0;
+
+#ifdef __SWITCH__
+static void IN_DisableGyro( void )
+{
+	int i;
+
+	for ( i = 0; i < NX_GYRO_HANDLE_COUNT; i++ ) {
+		if ( nx_gyroHandleActive[i] ) {
+			hidStopSixAxisSensor( nx_gyroHandles[i] );
+			nx_gyroHandleActive[i] = qfalse;
+		}
+	}
+
+	nx_gyroEnabled = qfalse;
+	CL_GyroEvent( 0.0f, 0.0f, 0.0f, in_eventTime );
+}
+
+static qboolean IN_StartGyroHandle(
+	int slot, HidNpadIdType id, HidNpadStyleTag style
+)
+{
+	Result rc;
+
+	rc = hidGetSixAxisSensorHandles( &nx_gyroHandles[slot], 1, id, style );
+	if ( R_FAILED( rc ) ) {
+		return qfalse;
+	}
+
+	rc = hidStartSixAxisSensor( nx_gyroHandles[slot] );
+	if ( R_FAILED( rc ) ) {
+		return qfalse;
+	}
+
+	nx_gyroHandleActive[slot] = qtrue;
+	return qtrue;
+}
+
+static qboolean IN_EnableGyro( void )
+{
+	HidNpadIdType id;
+	Result rc;
+	int controller;
+	int i;
+
+	for ( i = 0; i < NX_GYRO_HANDLE_COUNT; i++ ) {
+		nx_gyroHandleActive[i] = qfalse;
+	}
+
+	controller = in_joystickNo ? in_joystickNo->integer : 0;
+	if ( controller < 0 || controller > 7 ) {
+		controller = 0;
+	}
+	id = (HidNpadIdType)( HidNpadIdType_No1 + controller );
+
+	if ( controller == 0 ) {
+		padInitializeDefault( &nx_gyroPad );
+		IN_StartGyroHandle(
+			NX_GYRO_HANDHELD,
+			HidNpadIdType_Handheld,
+			HidNpadStyleTag_NpadHandheld
+		);
+	} else {
+		padInitialize( &nx_gyroPad, id );
+	}
+
+	IN_StartGyroHandle( NX_GYRO_FULLKEY, id, HidNpadStyleTag_NpadFullKey );
+	IN_StartGyroHandle( NX_GYRO_JOYLEFT, id, HidNpadStyleTag_NpadJoyLeft );
+	IN_StartGyroHandle( NX_GYRO_JOYRIGHT, id, HidNpadStyleTag_NpadJoyRight );
+
+	rc = hidGetSixAxisSensorHandles(
+		&nx_gyroHandles[NX_GYRO_JOYDUAL_LEFT],
+		2,
+		id,
+		HidNpadStyleTag_NpadJoyDual
+	);
+	if ( R_SUCCEEDED( rc ) ) {
+		for ( i = NX_GYRO_JOYDUAL_LEFT; i <= NX_GYRO_JOYDUAL_RIGHT; i++ ) {
+			if ( R_SUCCEEDED( hidStartSixAxisSensor( nx_gyroHandles[i] ) ) ) {
+				nx_gyroHandleActive[i] = qtrue;
+			}
+		}
+	}
+
+	for ( i = 0; i < NX_GYRO_HANDLE_COUNT; i++ ) {
+		if ( nx_gyroHandleActive[i] ) {
+			nx_gyroEnabled = qtrue;
+			return qtrue;
+		}
+	}
+
+	nx_gyroEnabled = qfalse;
+	return qfalse;
+}
+
+static qboolean IN_ReadGyroHandle( int slot )
+{
+	HidSixAxisSensorState state;
+	size_t count;
+
+	if ( !nx_gyroHandleActive[slot] ) {
+		return qfalse;
+	}
+
+	memset( &state, 0, sizeof( state ) );
+	count = hidGetSixAxisSensorStates( nx_gyroHandles[slot], &state, 1 );
+	if ( count == 0 ) {
+		return qfalse;
+	}
+
+	CL_GyroEvent(
+		state.angular_velocity.x,
+		state.angular_velocity.y,
+		state.angular_velocity.z,
+		in_eventTime
+	);
+	return qtrue;
+}
+
+static void IN_UpdateGyro( void )
+{
+	u64 style;
+	u64 attributes;
+	int now;
+	int slot = -1;
+
+	if ( !gamepad || !in_gyro || !in_gyro->integer ) {
+		if ( nx_gyroEnabled ) {
+			IN_DisableGyro();
+		}
+		return;
+	}
+
+	now = Sys_Milliseconds();
+	if ( !nx_gyroEnabled ) {
+		if ( now < nx_gyroRetryTime ) {
+			CL_GyroEvent( 0.0f, 0.0f, 0.0f, in_eventTime );
+			return;
+		}
+
+		if ( !IN_EnableGyro() ) {
+			nx_gyroRetryTime = now + 1000;
+			CL_GyroEvent( 0.0f, 0.0f, 0.0f, in_eventTime );
+			return;
+		}
+	}
+
+	padUpdate( &nx_gyroPad );
+	style = padGetStyleSet( &nx_gyroPad );
+	attributes = padGetAttributes( &nx_gyroPad );
+
+	if ( style & HidNpadStyleTag_NpadHandheld ) {
+		slot = NX_GYRO_HANDHELD;
+	} else if ( style & HidNpadStyleTag_NpadFullKey ) {
+		slot = NX_GYRO_FULLKEY;
+	} else if ( style & HidNpadStyleTag_NpadJoyDual ) {
+		if ( attributes & HidNpadAttribute_IsRightConnected ) {
+			slot = NX_GYRO_JOYDUAL_RIGHT;
+		} else if ( attributes & HidNpadAttribute_IsLeftConnected ) {
+			slot = NX_GYRO_JOYDUAL_LEFT;
+		}
+	} else if ( style & HidNpadStyleTag_NpadJoyRight ) {
+		slot = NX_GYRO_JOYRIGHT;
+	} else if ( style & HidNpadStyleTag_NpadJoyLeft ) {
+		slot = NX_GYRO_JOYLEFT;
+	}
+
+	if ( slot < 0 || !IN_ReadGyroHandle( slot ) ) {
+		CL_GyroEvent( 0.0f, 0.0f, 0.0f, in_eventTime );
+	}
+}
+#endif
 
 static SDL_Window *SDL_window = NULL;
 
@@ -474,8 +665,12 @@ static void IN_InitJoystick( void )
 	int total = 0;
 	char buf[16384] = "";
 
-	if (gamepad)
+	if (gamepad) {
+#ifdef __SWITCH__
+		IN_DisableGyro();
+#endif
 		SDL_GameControllerClose(gamepad);
+	}
 
 	if (stick != NULL)
 		SDL_JoystickClose(stick);
@@ -580,6 +775,9 @@ static void IN_ShutdownJoystick( void )
 
 	if (gamepad)
 	{
+#ifdef __SWITCH__
+		IN_DisableGyro();
+#endif
 		SDL_GameControllerClose(gamepad);
 		gamepad = NULL;
 	}
@@ -716,6 +914,9 @@ static void IN_GamepadMove( void )
 	qboolean translatedAxesSet[MAX_JOYSTICK_AXIS];
 
 	SDL_GameControllerUpdate();
+#ifdef __SWITCH__
+	IN_UpdateGyro();
+#endif
 
 	// check buttons
 	for (i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++)

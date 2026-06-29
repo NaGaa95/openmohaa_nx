@@ -468,6 +468,15 @@ extern	cvar_t	*j_forward_axis;
 extern	cvar_t	*j_side_axis;
 extern	cvar_t	*j_up_axis;
 
+extern	cvar_t	*in_gyro;
+extern	cvar_t	*gyro_yaw;
+extern	cvar_t	*gyro_pitch;
+extern	cvar_t	*gyro_yaw_axis;
+extern	cvar_t	*gyro_pitch_axis;
+extern	cvar_t	*gyro_deadzone;
+extern	cvar_t	*gyro_smoothing;
+extern	cvar_t	*gyro_invert_pitch;
+
 extern	cvar_t	*cl_timedemo;
 extern	cvar_t	*cl_aviFrameRate;
 extern	cvar_t	*cl_aviMotionJpeg;

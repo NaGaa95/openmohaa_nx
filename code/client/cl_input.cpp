@@ -64,6 +64,11 @@ kbutton_t	in_buttons[16];
 
 qboolean	in_mlooking;
 
+static float cl_gyroRates[3];
+static float cl_gyroFilteredYaw;
+static float cl_gyroFilteredPitch;
+static int   cl_gyroTime;
+
 void IN_ToggleMouse( void ) {
 	if( in_guimouse )
 	{
@@ -473,6 +478,20 @@ void CL_JoystickEvent( int axis, int value, int time ) {
 
 /*
 =================
+CL_GyroEvent
+
+The input backend reports controller gyro as radians/second around X/Y/Z.
+=================
+*/
+void CL_GyroEvent( float x, float y, float z, int time ) {
+	cl_gyroRates[0] = isfinite(x) ? x : 0.0f;
+	cl_gyroRates[1] = isfinite(y) ? y : 0.0f;
+	cl_gyroRates[2] = isfinite(z) ? z : 0.0f;
+	cl_gyroTime     = time;
+}
+
+/*
+=================
 CL_UpdateMouse
 
 Added in OPM
@@ -539,6 +558,114 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 	}
 
 	cmd->upmove = ClampChar( cmd->upmove + (int)up );
+}
+
+/*
+=================
+CL_GyroMove
+=================
+*/
+void CL_GyroMove( usercmd_t *cmd ) {
+	float rates[3];
+	float deadzone;
+	float smoothing;
+	float cgameSensitivity;
+	float yawRate;
+	float pitchRate;
+	float yawDelta;
+	float pitchDelta;
+	float dt;
+	int   yawAxis;
+	int   pitchAxis;
+
+	if ( !in_gyro || !in_gyro->integer ) {
+		cl_gyroFilteredYaw   = 0.0f;
+		cl_gyroFilteredPitch = 0.0f;
+		return;
+	}
+
+	if ( UI_MenuActive() || UI_ConsoleIsOpen() || ( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CONSOLE ) ) ) {
+		cl_gyroFilteredYaw   = 0.0f;
+		cl_gyroFilteredPitch = 0.0f;
+		return;
+	}
+
+	if ( cl_gyroTime && com_frameTime - cl_gyroTime > 250 ) {
+		cl_gyroFilteredYaw   = 0.0f;
+		cl_gyroFilteredPitch = 0.0f;
+		return;
+	}
+
+	yawAxis = gyro_yaw_axis ? gyro_yaw_axis->integer : 1;
+	if ( yawAxis < 0 ) {
+		yawAxis = 0;
+	} else if ( yawAxis > 2 ) {
+		yawAxis = 2;
+	}
+
+	pitchAxis = gyro_pitch_axis ? gyro_pitch_axis->integer : 0;
+	if ( pitchAxis < 0 ) {
+		pitchAxis = 0;
+	} else if ( pitchAxis > 2 ) {
+		pitchAxis = 2;
+	}
+
+	rates[0] = cl_gyroRates[0];
+	rates[1] = cl_gyroRates[1];
+	rates[2] = cl_gyroRates[2];
+
+	yawRate   = rates[yawAxis];
+	pitchRate = rates[pitchAxis];
+
+	deadzone = gyro_deadzone ? gyro_deadzone->value : 0.02f;
+	if ( deadzone < 0.0f ) {
+		deadzone = 0.0f;
+	}
+
+	if ( fabs(yawRate) < deadzone ) {
+		yawRate = 0.0f;
+	}
+	if ( fabs(pitchRate) < deadzone ) {
+		pitchRate = 0.0f;
+	}
+
+	smoothing = gyro_smoothing ? gyro_smoothing->value : 0.25f;
+	if ( smoothing < 0.0f ) {
+		smoothing = 0.0f;
+	} else if ( smoothing > 0.95f ) {
+		smoothing = 0.95f;
+	}
+
+	cl_gyroFilteredYaw   = cl_gyroFilteredYaw * smoothing + yawRate * ( 1.0f - smoothing );
+	cl_gyroFilteredPitch = cl_gyroFilteredPitch * smoothing + pitchRate * ( 1.0f - smoothing );
+
+	if ( cl_gyroFilteredYaw == 0.0f && cl_gyroFilteredPitch == 0.0f ) {
+		return;
+	}
+
+	dt = cls.frametime * 0.001f;
+	if ( dt <= 0.0f ) {
+		return;
+	}
+
+	cgameSensitivity = 1.0f;
+	if ( cge && !UI_MenuActive() )
+	{
+		if ( cge->CG_SensitivityScale() >= 0.0f ) {
+			cgameSensitivity = cge->CG_SensitivityScale();
+		}
+	}
+
+	yawDelta   = RAD2DEG( cl_gyroFilteredYaw ) * dt * ( gyro_yaw ? gyro_yaw->value : 1.0f ) * cgameSensitivity;
+	pitchDelta = RAD2DEG( cl_gyroFilteredPitch ) * dt * ( gyro_pitch ? gyro_pitch->value : 1.0f ) * cgameSensitivity;
+
+	if ( gyro_invert_pitch && gyro_invert_pitch->integer ) {
+		pitchDelta = -pitchDelta;
+	}
+
+	cl.viewangles[YAW] += yawDelta;
+	cl.viewangles[PITCH] += pitchDelta;
+	cmd->buttons |= BUTTON_ANY;
 }
 
 /*
@@ -744,6 +871,9 @@ usercmd_t CL_CreateCmd( void ) {
 
 	// get basic movement from joystick
 	CL_JoystickMove( &cmd );
+
+	// get fine aim adjustment from gyro
+	CL_GyroMove( &cmd );
 
 	// check to make sure the angles haven't wrapped
 	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {

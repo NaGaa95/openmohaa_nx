@@ -101,6 +101,15 @@ cvar_t	*j_forward_axis;
 cvar_t	*j_side_axis;
 cvar_t	*j_up_axis;
 
+cvar_t	*in_gyro;
+cvar_t	*gyro_yaw;
+cvar_t	*gyro_pitch;
+cvar_t	*gyro_yaw_axis;
+cvar_t	*gyro_pitch_axis;
+cvar_t	*gyro_deadzone;
+cvar_t	*gyro_smoothing;
+cvar_t	*gyro_invert_pitch;
+
 cvar_t	*cl_activeAction;
 
 cvar_t	*cl_motdString;
@@ -3675,11 +3684,24 @@ void CL_Init( void ) {
 	j_side_axis =    Cvar_Get ("j_side_axis",    "0", CVAR_ARCHIVE);
 	j_up_axis =      Cvar_Get ("j_up_axis",      "4", CVAR_ARCHIVE);
 
+	in_gyro =           Cvar_Get ("in_gyro",           "0",    CVAR_ARCHIVE);
+	gyro_yaw =          Cvar_Get ("gyro_yaw",          "8.0",  CVAR_ARCHIVE);
+	gyro_pitch =        Cvar_Get ("gyro_pitch",        "8.0",  CVAR_ARCHIVE);
+	gyro_yaw_axis =     Cvar_Get ("gyro_yaw_axis",     "1",    CVAR_ARCHIVE);
+	gyro_pitch_axis =   Cvar_Get ("gyro_pitch_axis",   "0",    CVAR_ARCHIVE);
+	gyro_deadzone =     Cvar_Get ("gyro_deadzone",     "0.02", CVAR_ARCHIVE);
+	gyro_smoothing =    Cvar_Get ("gyro_smoothing",    "0.25", CVAR_ARCHIVE);
+	gyro_invert_pitch = Cvar_Get ("gyro_invert_pitch", "0",    CVAR_ARCHIVE);
+
 	Cvar_CheckRange(j_pitch_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
 	Cvar_CheckRange(j_yaw_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
 	Cvar_CheckRange(j_forward_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
 	Cvar_CheckRange(j_side_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
 	Cvar_CheckRange(j_up_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
+	Cvar_CheckRange(gyro_yaw_axis, 0, 2, qtrue);
+	Cvar_CheckRange(gyro_pitch_axis, 0, 2, qtrue);
+	Cvar_CheckRange(gyro_deadzone, 0.0f, 10.0f, qfalse);
+	Cvar_CheckRange(gyro_smoothing, 0.0f, 0.95f, qfalse);
 
 	cl_motdString = Cvar_Get( "cl_motdString", "", CVAR_ROM );
 

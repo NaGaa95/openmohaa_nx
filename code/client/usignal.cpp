@@ -26,19 +26,6 @@ UConnection::UConnection()
 {
 }
 
-UConnection::~UConnection()
-{
-	int i;
-
-	for( i = m_events.NumObjects(); i > 0; i-- )
-	{
-		delete m_events.ObjectAt( i );
-	}
-
-	m_events.FreeObjectList();
-	m_listeners.FreeObjectList();
-}
-
 UConnection::UConnection(const Event& inevent, const Event& outevent)
 	: m_inevent(inevent)
 	, m_outevent(outevent)
@@ -170,31 +157,10 @@ bool UConnection::SendEvent
 	return sent;
 }
 
-bool UConnection::Empty
-	(
-	void
-	) const
-
-{
-	return m_listeners.NumObjects() == 0;
-}
-
 CLASS_DECLARATION( Listener, USignal, NULL )
 {
 	{ NULL, NULL }
 };
-
-USignal::~USignal()
-{
-	int i;
-
-	for( i = m_connections.NumObjects(); i > 0; i-- )
-	{
-		delete m_connections.ObjectAt( i );
-	}
-
-	m_connections.FreeObjectList();
-}
 
 bool USignal::SendSignal
 	(
@@ -212,15 +178,7 @@ bool USignal::SendSignal
 		c = m_connections.ObjectAt( i );
 		if( c->TypeIs( ev ) )
 		{
-			bool sent = c->SendEvent( this, ev );
-
-			if( c->Empty() )
-			{
-				m_connections.RemoveObjectAt( i );
-				delete c;
-			}
-
-			return sent;
+			return c->SendEvent( this, ev );
 		}
 	}
 
@@ -278,15 +236,7 @@ bool USignal::Disconnect
 		c = m_connections.ObjectAt( i );
 		if( c->TypeIs( ev ) )
 		{
-			bool removed = c->RemoveListener( object );
-
-			if( c->Empty() )
-			{
-				m_connections.RemoveObjectAt( i );
-				delete c;
-			}
-
-			return removed;
+			return c->RemoveListener( object );
 		}
 	}
 
@@ -313,12 +263,6 @@ bool USignal::Disconnect
 		if( c->RemoveListener( object ) )
 		{
 			result = true;
-		}
-
-		if( c->Empty() )
-		{
-			m_connections.RemoveObjectAt( i );
-			delete c;
 		}
 	}
 
